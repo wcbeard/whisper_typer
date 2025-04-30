@@ -1,7 +1,7 @@
 """
 WhisperTyper setup.py script for creating a macOS menubar app
+Uses increased recursion limit to handle complex dependency trees.
 
-Usage:
 For Development:
     python setup.py py2app -A
 
@@ -9,34 +9,39 @@ For Distribution:
     python setup.py py2app
 """
 
+import sys
+
+# Increase recursion limit to avoid errors during packaging
+# This is needed due to complex dependency chains in some libraries
+sys.setrecursionlimit(5000)
+
 from setuptools import setup
 
-APP = ["whisper_typer.py"]
+APP = ["whisper_typer.py"]  # Main application file
 DATA_FILES = []
+
 OPTIONS = {
-    "argv_emulation": False,  # Disabling to prevent issues
+    "argv_emulation": False,  # Disabling to prevent issues with keyboard shortcuts
     "plist": {
         "LSUIElement": True,  # This makes it a menu bar app without a dock icon
-        "CFBundleIdentifier": "com.yourusername.whispertyper",
+        "CFBundleIdentifier": "com.wcbeard.whispertyper",
         "CFBundleName": "WhisperTyper",
         "CFBundleDisplayName": "WhisperTyper",
         "CFBundleVersion": "0.1.0",
-        "NSHumanReadableCopyright": "Copyright © 2025 Your Name",
-        # Add these for better notification support
+        "NSHumanReadableCopyright": "Copyright © 2025 wcbeard",
+        # Notification support
         "NSUserNotificationAlertStyle": "alert",
         "CFBundleShortVersionString": "0.1.0",
-        # Add microphone usage description
+        # Microphone access description - required for permission prompt
         "NSMicrophoneUsageDescription": "WhisperTyper needs microphone access to convert speech to text",
     },
+    # Include only essential packages to avoid dependency issues
     "packages": [
         "rumps",
-        "pyaudio",
-        "wave",
-        "whisper",
-        "pyperclip",
         "pynput",
+        "pyperclip",
     ],
-    # You might need to adjust this list based on your exact dependencies
+    # Include required modules
     "includes": [
         "threading",
         "time",
@@ -47,7 +52,21 @@ OPTIONS = {
         "subprocess",
         "pynput.keyboard",
     ],
-    # Specify frameworks that PyAudio needs
+    # Explicitly exclude packages known to cause issues
+    "excludes": [
+        "numpy",
+        "scipy",
+        "pandas",
+        "matplotlib",
+        "torch",
+        "PyQt5",
+        "PyQt6",
+        "PySide2",
+        "PySide6",
+        "IPython",
+        "tkinter",
+    ],
+    # Specify any needed frameworks
     "frameworks": ["/System/Library/Frameworks/Carbon.framework"],
 }
 
