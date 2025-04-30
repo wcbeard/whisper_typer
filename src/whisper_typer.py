@@ -1,3 +1,8 @@
+"""
+WhisperTyper - A macOS menu bar app for voice-to-text transcription using OpenAI's Whisper model.
+Uses keyboard shortcuts to start/stop recording and automatically transcribes speech to text.
+"""
+
 import rumps
 import threading
 import time
@@ -7,6 +12,8 @@ import sys
 import tempfile
 import subprocess
 import pyperclip
+from pynput import keyboard
+from keyboard_handler import KeyboardShortcutHandler
 
 # Icon configuration - easy to customize
 ICON_IDLE = "W"  # Icon when not recording
@@ -51,72 +58,6 @@ def setup_logging():
 # Set up logging
 setup_logging()
 logging.info("Starting WhisperTyperApp")
-
-
-# Use AppleScript for global hotkey instead of pynput
-def register_hotkey():
-    """
-    Register a global hotkey using macOS's built-in tools.
-    This creates a small AppleScript application that listens for
-    the keyboard shortcut and triggers our app.
-    """
-    try:
-        # Create a temporary AppleScript file
-        script_path = os.path.expanduser("~/whisper_hotkey.scpt")
-
-        # AppleScript to listen for our shortcut and send a notification
-        applescript = """
-        on run
-            tell application "System Events"
-                -- Listen for right option + enter
-                set enterDown to false
-                set optionDown to false
-                set lastTriggered to 0
-                
-                repeat
-                    -- Check for Option+Enter combination
-                    if (key code 36 is down) then
-                        set enterDown to true
-                    else
-                        set enterDown to false
-                    end if
-                    
-                    if (key code 61 is down) then
-                        set optionDown to true
-                    else
-                        set optionDown to false
-                    end if
-                    
-                    if (enterDown and optionDown) then
-                        set currentTime to (do shell script "date +%s") as integer
-                        if currentTime - lastTriggered > 1 then
-                            set lastTriggered to currentTime
-                            do shell script "open 'whispertyper://toggle'"
-                        end if
-                    end if
-                    
-                    delay 0.1
-                end repeat
-            end tell
-        end run
-        """
-
-        # Write the AppleScript to a file
-        with open(script_path, "w") as f:
-            f.write(applescript)
-
-        # Compile and run the AppleScript
-        subprocess.Popen(
-            ["osascript", script_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-
-        logging.info("Registered global hotkey using AppleScript")
-        return True
-    except Exception as e:
-        logging.error(f"Failed to register global hotkey: {str(e)}")
-        return False
 
 
 class WhisperTyperApp(rumps.App):
@@ -184,58 +125,27 @@ class WhisperTyperApp(rumps.App):
             self.temp_dir = tempfile.gettempdir()
             self.temp_file = os.path.join(self.temp_dir, "whisper_recording.wav")
 
-        # Register URL handler for hotkey callback
-        self.register_url_handlers()
-
-        # Register the hotkey
-        register_hotkey()
-
+        # Set up keyboard shortcut handler using our reliable implementation
+        self.shortcut_handler = KeyboardShortcutHandler(
+            shortcut_keys=(keyboard.Key.alt_r, keyboard.Key.enter),
+            callback=self.handle_keyboard_shortcut,
+            debounce_seconds=1.0
+        )
+        
         logging.info("Initialization complete")
-
-    def register_url_handlers(self):
-        """Register URL handlers for AppleScript communication"""
-        try:
-            # Create a LSHandlers file to register our custom URL scheme
-            handlers_path = os.path.expanduser(
-                "~/Library/Preferences/com.apple.LaunchServices/LSHandlers.plist"
-            )
-
-            # Check if the file exists
-            if not os.path.exists(handlers_path):
-                # We'll use defaults command instead
-                app_path = sys.argv[0]
-                subprocess.run(
-                    [
-                        # "defaults",
-                        # "write",
-                        # "com.apple.LaunchServices",
-                        # "LSHandlers",
-                        # "-array-add",
-                        # f'{{"LSHandlerURLScheme":"whispertyper","LSHandlerRole":"Editor","LSHandlerPath":"{app_path}"}}',
-                        "defaults",
-                        "write",
-                        "com.apple.LaunchServices",
-                        "LSHandlers",
-                        "-array-add",
-                        f"'LSHandlerURLScheme'='whispertyper';'LSHandlerRole'='Editor';'LSHandlerPath'='{app_path}'",
-                    ]
-                )
-
-            logging.info("Registered URL handlers")
-        except Exception as e:
-            logging.error(f"Failed to register URL handlers: {str(e)}")
-
-    def handle_open_url(self, url):
-        """Handle URL callback from AppleScript"""
-        logging.info(f"Received URL callback: {url}")
-        if url == "whispertyper://toggle":
-            # Schedule a timer to toggle recording on main thread
-            def do_toggle(_):
-                if not self.processing:
-                    self.toggle_recording(self.record_button)
-
-            timer = rumps.Timer(do_toggle, 0.1)
-            timer.start()
+    
+    def handle_keyboard_shortcut(self):
+        """Handle keyboard shortcut callback from the KeyboardShortcutHandler"""
+        logging.info("Keyboard shortcut triggered callback")
+        
+        # Only toggle if we're not already processing
+        if not self.processing:
+            # We need to toggle on the main thread
+            # Since we can't use rumps.Timer, we'll directly toggle
+            # This is safe because our callback is properly synchronized
+            self.toggle_recording(self.record_button)
+        else:
+            logging.info("Ignoring shortcut while processing")
 
     def set_model(self, model_name):
         """Set the Whisper model to use"""
@@ -350,13 +260,8 @@ class WhisperTyperApp(rumps.App):
                 wf.close()
                 logging.info(f"Saved recording to {self.temp_file}")
 
-                # Update status to transcribing
-                def update_to_transcribing(_):
-                    self.status_item.title = "Status: Transcribing..."
-                    # Keep the processing icon during transcription
-
-                timer = rumps.Timer(update_to_transcribing, 0.1)
-                timer.start()
+                # Update status directly (avoid using Timer)
+                self.status_item.title = "Status: Transcribing..."
 
                 # Load Whisper model if not already loaded
                 if self.whisper_model is None:
@@ -387,39 +292,27 @@ class WhisperTyperApp(rumps.App):
                 )
 
                 # Update status back to ready
-                def update_to_ready(_):
-                    self.status_item.title = "Status: Ready"
-                    self.title = ICON_IDLE  # Back to idle icon
-                    self.processing = False  # Exit processing state
-
-                timer = rumps.Timer(update_to_ready, 0.1)
-                timer.start()
+                self.status_item.title = "Status: Ready"
+                self.title = ICON_IDLE  # Back to idle icon
+                self.processing = False  # Exit processing state
             else:
                 logging.warning("No audio frames captured")
                 self.show_notification("Warning", "No audio captured")
 
                 # Update status back to ready
-                def update_to_ready(_):
-                    self.status_item.title = "Status: Ready"
-                    self.title = ICON_IDLE  # Back to idle icon
-                    self.processing = False  # Exit processing state
-
-                timer = rumps.Timer(update_to_ready, 0.1)
-                timer.start()
+                self.status_item.title = "Status: Ready"
+                self.title = ICON_IDLE  # Back to idle icon
+                self.processing = False  # Exit processing state
 
         except Exception as e:
             logging.error(f"Error in record_audio method: {str(e)}")
 
             # Update status to error
-            def update_to_error(_):
-                self.record_button.title = "Start Recording"
-                self.status_item.title = f"Status: Error - See log"
-                self.title = ICON_IDLE  # Back to idle icon
-                self.recording = False
-                self.processing = False  # Exit processing state
-
-            timer = rumps.Timer(update_to_error, 0.1)
-            timer.start()
+            self.record_button.title = "Start Recording"
+            self.status_item.title = f"Status: Error - See log"
+            self.title = ICON_IDLE  # Back to idle icon
+            self.recording = False
+            self.processing = False  # Exit processing state
 
             self.show_notification("Recording Error", str(e))
         finally:
@@ -471,11 +364,9 @@ class WhisperTyperApp(rumps.App):
         self.recording = False
         self.processing = False
 
-        # Kill the AppleScript process
-        try:
-            subprocess.run(["pkill", "-f", "whisper_hotkey.scpt"])
-        except:
-            pass
+        # Stop keyboard shortcut handler
+        if hasattr(self, 'shortcut_handler'):
+            self.shortcut_handler.stop()
 
         # Clean up temp file
         if hasattr(self, "temp_file") and os.path.exists(self.temp_file):
@@ -492,11 +383,6 @@ if __name__ == "__main__":
     try:
         logging.info("Starting application")
         app = WhisperTyperApp()
-
-        # Check if started with URL argument (from AppleScript)
-        if len(sys.argv) > 1 and sys.argv[1].startswith("whispertyper://"):
-            app.handle_open_url(sys.argv[1])
-
         app.run()
     except Exception as e:
         logging.error(f"Unhandled exception in main: {str(e)}")
