@@ -15,15 +15,20 @@ install:
 # Development (alias) mode - for quick testing
 dev:
 	mkdir -p build
+	mkdir -p build/resources
 	cp src/whisper_typer.py build/whisper_typer.py
 	cp src/keyboard_handler.py build/
 	cp packaging/setup.py build/
+	cp resources/app.icns build/resources/
 	cd build && python setup.py py2app -A
 
 # Production build
 build: clean
 	# Create build directory
 	mkdir -p build
+	mkdir -p build/resources
+	# Copy resources
+	cp -R resources/* build/resources/
 	# Copy source files
 	cp src/whisper_typer.py build/whisper_typer.py
 	cp src/keyboard_handler.py build/
