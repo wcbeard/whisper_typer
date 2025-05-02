@@ -88,3 +88,6 @@ build/
 
 # Local test scripts
 local_tests/
+
+# VS Code launch configuration
+launch.json

@@ -22,6 +22,7 @@ DATA_FILES = []
 
 OPTIONS = {
     "argv_emulation": False,  # Disabling to prevent issues with keyboard shortcuts
+    "iconfile": "resources/app.icns",  # Updated icon file path
     "plist": {
         "LSUIElement": True,  # This makes it a menu bar app without a dock icon
         "CFBundleIdentifier": "com.wcbeard.whispertyper",
@@ -34,6 +35,9 @@ OPTIONS = {
         "CFBundleShortVersionString": "0.1.0",
         # Microphone access description - required for permission prompt
         "NSMicrophoneUsageDescription": "WhisperTyper needs microphone access to convert speech to text",
+        # Accessibility and input monitoring permissions
+        "NSAccessibilityUsageDescription": "WhisperTyper requires accessibility permissions to monitor and control the keyboard.",
+        "NSInputMonitoringUsageDescription": "WhisperTyper requires input monitoring permissions to detect keyboard inputs.",
     },
     # Include only essential packages to avoid dependency issues
     "packages": [
@@ -66,8 +70,9 @@ OPTIONS = {
         "IPython",
         "tkinter",
     ],
-    # Specify any needed frameworks
-    "frameworks": ["/System/Library/Frameworks/Carbon.framework"],
+    # Don't explicitly include the entire standard library--
+    # let py2app find it
+    # "frameworks": ["/System/Library/Frameworks/Carbon.framework"],
 }
 
 setup(

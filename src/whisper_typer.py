@@ -1,6 +1,6 @@
 """
 WhisperTyper - A macOS menu bar app for voice-to-text transcription using OpenAI's Whisper model.
-Uses keyboard shortcuts to start/stop recording and automatically transcribes speech to text.
+Uses modular keyboard shortcut handlers to start/stop recording and automatically transcribes speech to text.
 """
 
 import rumps
@@ -12,8 +12,9 @@ import sys
 import tempfile
 import subprocess
 import pyperclip
-from pynput import keyboard
-from keyboard_handler import KeyboardShortcutHandler
+
+# Import the keyboard interface
+from keyboard_interface import create_keyboard_handler
 
 # Icon configuration - easy to customize
 ICON_IDLE = "W"  # Icon when not recording
@@ -51,8 +52,9 @@ def setup_logging():
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(logging.DEBUG)
-    root_logger.addHandler(file_handler)
-    root_logger.addHandler(stdout_handler)
+    if not root_logger.hasHandlers():
+        root_logger.addHandler(file_handler)
+        root_logger.addHandler(stdout_handler)
 
 
 # Set up logging
@@ -73,6 +75,8 @@ class WhisperTyperApp(rumps.App):
         self.processing = False
         self.whisper_model = None
         self.current_model = "tiny"
+        self.keyboard_handler = None
+        self.keyboard_method = None
 
         # Create menu items as instance variables
         self.status_item = rumps.MenuItem("Status: Ready")
@@ -102,6 +106,26 @@ class WhisperTyperApp(rumps.App):
         else:
             self.model_menu = rumps.MenuItem("Whisper Not Installed")
 
+        # Add keyboard handler selection menu
+        self.keyboard_menu = rumps.MenuItem("Keyboard Handler")
+        self.keyboard_pynput = rumps.MenuItem(
+            "pynput", callback=lambda _: self.set_keyboard_method("pynput")
+        )
+        self.keyboard_quartz = rumps.MenuItem(
+            "Quartz", callback=lambda _: self.set_keyboard_method("quartz")
+        )
+        self.keyboard_appkit = rumps.MenuItem(
+            "AppKit", callback=lambda _: self.set_keyboard_method("appkit")
+        )
+        self.keyboard_applescript = rumps.MenuItem(
+            "AppleScript", callback=lambda _: self.set_keyboard_method("applescript")
+        )
+
+        self.keyboard_menu.add(self.keyboard_pynput)
+        self.keyboard_menu.add(self.keyboard_quartz)
+        self.keyboard_menu.add(self.keyboard_appkit)
+        self.keyboard_menu.add(self.keyboard_applescript)
+
         # Setup menu
         self.menu = [
             self.status_item,
@@ -110,7 +134,9 @@ class WhisperTyperApp(rumps.App):
             self.shortcut_info,
             None,  # Separator
             self.model_menu,
+            self.keyboard_menu,
             None,  # Separator
+            rumps.MenuItem("Open Log", callback=self.open_log),
             rumps.MenuItem("Quit", callback=self.quit_app),
         ]
 
@@ -125,27 +151,134 @@ class WhisperTyperApp(rumps.App):
             self.temp_dir = tempfile.gettempdir()
             self.temp_file = os.path.join(self.temp_dir, "whisper_recording.wav")
 
-        # Set up keyboard shortcut handler using our reliable implementation
-        self.shortcut_handler = KeyboardShortcutHandler(
-            shortcut_keys=(keyboard.Key.alt_r, keyboard.Key.enter),
-            callback=self.handle_keyboard_shortcut,
-            debounce_seconds=1.0
-        )
-        
+        # Set up keyboard shortcut handler - try methods in order of reliability
+        self.initialize_keyboard_handler()
+
         logging.info("Initialization complete")
-    
+
+    def initialize_keyboard_handler(self):
+        """Initialize the keyboard shortcut handler with the best available method"""
+        # Try different methods in order of reliability (for packaged apps)
+        methods_to_try = ["quartz", "appkit", "pynput", "applescript"]
+
+        # Check if we're running as a packaged app
+        is_packaged = getattr(sys, "frozen", False)
+        if is_packaged:
+            # In packaged apps, pynput often doesn't work, so try other methods first
+            logging.info(
+                "Running as packaged app, prioritizing Quartz and AppKit methods"
+            )
+        else:
+            # In development, pynput usually works fine and is simpler
+            logging.info("Running in development mode, prioritizing pynput method")
+            methods_to_try.insert(0, "appkit")  # Try appkit first in development
+
+        # Try each method until one works
+        for method in methods_to_try:
+            try:
+                success = self.set_keyboard_method(method, show_notification=False)
+                if success:
+                    break
+            except Exception as e:
+                logging.error(f"Failed to initialize {method} keyboard handler: {e}")
+                continue
+
+        # If no method worked, show a warning
+        if not self.keyboard_handler:
+            logging.warning("No keyboard handler could be initialized")
+            self.show_notification(
+                "Warning",
+                "Could not initialize keyboard shortcuts. Menu options will still work.",
+            )
+
+    def set_keyboard_method(self, method, show_notification=True):
+        """Change the keyboard shortcut handler method"""
+        logging.info(f"Setting keyboard method to: {method}")
+
+        # Store previous method for menu state updates
+        previous_method = self.keyboard_method
+
+        # Stop existing handler if any
+        if self.keyboard_handler:
+            logging.info("Stopping existing keyboard handler")
+            self.keyboard_handler.stop()
+            self.keyboard_handler = None
+
+        # Debug active monitors (AppKit-specific)
+        if method == "appkit":
+            logging.info("Checking for active AppKit monitors before initialization")
+
+        # Try to create the new handler
+        try:
+            self.keyboard_handler = create_keyboard_handler(
+                method=method,
+                callback=self.handle_keyboard_shortcut,
+                shortcut_keys=None,  # Use default for each method
+                debounce_seconds=1.0,
+            )
+
+            if self.keyboard_handler:
+                self.keyboard_method = method
+                logging.info(f"Successfully set keyboard method to: {method}")
+
+                # Update menu checkmarks
+                self.keyboard_appkit.state = method == "appkit"
+                self.keyboard_pynput.state = method == "pynput"
+                self.keyboard_quartz.state = method == "quartz"
+                self.keyboard_applescript.state = method == "applescript"
+
+                if show_notification:
+                    self.show_notification("Keyboard Method", f"Changed to: {method}")
+
+                return True
+            else:
+                logging.error(f"Failed to create keyboard handler for method: {method}")
+
+                # Restore previous method if it was working
+                if previous_method:
+                    logging.info(f"Restoring previous method: {previous_method}")
+                    self.set_keyboard_method(previous_method, show_notification=False)
+
+                if show_notification:
+                    self.show_notification(
+                        "Error", f"Failed to set keyboard method to: {method}"
+                    )
+
+                return False
+
+        except Exception as e:
+            logging.error(f"Error setting keyboard method to {method}: {e}")
+
+            # Restore previous method if it was working
+            if previous_method:
+                logging.info(f"Restoring previous method: {previous_method}")
+                self.set_keyboard_method(previous_method, show_notification=False)
+
+            if show_notification:
+                self.show_notification(
+                    "Error", f"Failed to set keyboard method to: {method}"
+                )
+
+            return False
+
     def handle_keyboard_shortcut(self):
-        """Handle keyboard shortcut callback from the KeyboardShortcutHandler"""
+        """Handle keyboard shortcut callback"""
         logging.info("Keyboard shortcut triggered callback")
-        
+
         # Only toggle if we're not already processing
         if not self.processing:
-            # We need to toggle on the main thread
-            # Since we can't use rumps.Timer, we'll directly toggle
-            # This is safe because our callback is properly synchronized
             self.toggle_recording(self.record_button)
         else:
             logging.info("Ignoring shortcut while processing")
+
+    def open_log(self, _):
+        """Open the log file"""
+        log_file = os.path.expanduser("~/whisper_typer.log")
+        try:
+            subprocess.run(["open", log_file])
+        except Exception as e:
+            logging.error(f"Error opening log file: {e}")
+            self.show_notification("Error", f"Could not open log file: {e}")
 
     def set_model(self, model_name):
         """Set the Whisper model to use"""
@@ -162,7 +295,9 @@ class WhisperTyperApp(rumps.App):
 
     def toggle_recording(self, sender):
         """Toggle recording state"""
-        logging.info(f"Toggle recording called. Current state: {self.recording}")
+        logging.info("Toggle recording called.")
+        logging.info(f"Recording state before toggle: {self.recording}")
+        logging.info(f"Processing state before toggle: {self.processing}")
 
         # Don't allow toggling while processing
         if self.processing:
@@ -357,7 +492,7 @@ class WhisperTyperApp(rumps.App):
             logging.error(f"Error typing text: {str(e)}")
             self.show_notification("Error", f"Failed to type text: {str(e)}")
 
-    def quit_app(self, sender):
+    def quit_app(self, _):
         """Quit the application properly"""
         logging.info("Quitting application")
         # Stop recording if active
@@ -365,8 +500,8 @@ class WhisperTyperApp(rumps.App):
         self.processing = False
 
         # Stop keyboard shortcut handler
-        if hasattr(self, 'shortcut_handler'):
-            self.shortcut_handler.stop()
+        if self.keyboard_handler:
+            self.keyboard_handler.stop()
 
         # Clean up temp file
         if hasattr(self, "temp_file") and os.path.exists(self.temp_file):
