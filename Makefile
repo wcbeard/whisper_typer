@@ -30,8 +30,8 @@ build: clean
 	# Copy resources
 	cp -R resources/* build/resources/
 	# Copy source files
-	cp src/whisper_typer.py build/whisper_typer.py
-	cp src/keyboard_handler.py build/
+	cp src/* build/
+
 	# Copy setup.py
 	cp packaging/setup.py build/
 	# Move to build dir and run py2app

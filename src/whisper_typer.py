@@ -5,7 +5,6 @@ Uses modular keyboard shortcut handlers to start/stop recording and automaticall
 
 import rumps
 import threading
-import time
 import logging
 import os
 import sys
@@ -13,8 +12,15 @@ import tempfile
 import subprocess
 import pyperclip
 
+# Need to manually import these for py2app to include them
+import objc  # noqa: F401
+import Foundation  # noqa: F401
+import AppKit  # noqa: F401
+from AppKit import NSApp, NSStatusBar, NSMenu, NSMenuItem, NSMakeRect  # noqa: F401
+
 # Import the keyboard interface
 from keyboard_interface import create_keyboard_handler
+
 
 # Icon configuration - easy to customize
 ICON_IDLE = "W"  # Icon when not recording
@@ -28,7 +34,8 @@ try:
     import whisper
 
     WHISPER_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logging.error(f"Import error: {e}")
     WHISPER_AVAILABLE = False
     logging.warning(
         "Some dependencies are missing. Full functionality may not be available."
@@ -159,7 +166,7 @@ class WhisperTyperApp(rumps.App):
     def initialize_keyboard_handler(self):
         """Initialize the keyboard shortcut handler with the best available method"""
         # Try different methods in order of reliability (for packaged apps)
-        methods_to_try = ["quartz", "appkit", "pynput", "applescript"]
+        methods_to_try = ["appkit", "quartz", "pynput", "applescript"]
 
         # Check if we're running as a packaged app
         is_packaged = getattr(sys, "frozen", False)
@@ -444,7 +451,7 @@ class WhisperTyperApp(rumps.App):
 
             # Update status to error
             self.record_button.title = "Start Recording"
-            self.status_item.title = f"Status: Error - See log"
+            self.status_item.title = "Status: Error - See log"
             self.title = ICON_IDLE  # Back to idle icon
             self.recording = False
             self.processing = False  # Exit processing state
@@ -456,19 +463,19 @@ class WhisperTyperApp(rumps.App):
                 try:
                     stream.stop_stream()
                     stream.close()
-                except:
+                except Exception:
                     pass
 
             try:
                 audio.terminate()
-            except:
+            except Exception:
                 pass
 
             # Clean up temp file
             if os.path.exists(self.temp_file):
                 try:
                     os.remove(self.temp_file)
-                except:
+                except Exception:
                     logging.warning(f"Failed to remove temp file: {self.temp_file}")
 
             logging.info("record_audio method finished")
@@ -507,7 +514,7 @@ class WhisperTyperApp(rumps.App):
         if hasattr(self, "temp_file") and os.path.exists(self.temp_file):
             try:
                 os.remove(self.temp_file)
-            except:
+            except Exception:
                 logging.warning(f"Failed to remove temp file: {self.temp_file}")
 
         # Quit the app

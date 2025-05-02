@@ -55,14 +55,32 @@ OPTIONS = {
         "tempfile",
         "subprocess",
         "pynput.keyboard",
+        "whisper",
+        "torch",
+        "numpy",
+        "pyaudio",
+        "wave",
+        "AppKit",
+        "Foundation",
+        "objc",
+        "rumps",
+        "pynput.keyboard",
+        # This is important - include the actual module that contains NSMakeRect
+        "AppKit._inlines",
+        "Foundation._inlines",
+        # The following are dynamically loaded with importlib
+        # and are not explicitly imported in the code
+        "keyboard_handler_appkit",
+        "keyboard_handler_quartz",
+        "keyboard_handler_pynput",
     ],
+    # This is sometimes needed to avoid packaging issues
+    "prefer_ppc": False,
     # Explicitly exclude packages known to cause issues
     "excludes": [
-        "numpy",
         "scipy",
         "pandas",
         "matplotlib",
-        "torch",
         "PyQt5",
         "PyQt6",
         "PySide2",
@@ -80,7 +98,7 @@ setup(
     name="WhisperTyper",
     data_files=DATA_FILES,
     options={"py2app": OPTIONS},
-    setup_requires=["py2app"],
+    setup_requires=["py2app", "pyobjc-framework-Cocoa"],
     install_requires=[
         "rumps",
         "openai-whisper",
