@@ -76,6 +76,7 @@ class WhisperTyperApp(rumps.App):
         super(WhisperTyperApp, self).__init__(
             "WhisperTyper",
             TEXT_ICON_IDLE,
+            quit_button=None,
         )
         logging.info("Initializing WhisperTyperApp")
 

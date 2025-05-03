@@ -175,4 +175,7 @@ setup(
         "pyperclip",
         "pynput",
     ],
+    extras_require={
+        "dev": ["pillow>=9.0.0"],
+    },
 )
