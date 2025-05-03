@@ -21,11 +21,10 @@ from AppKit import NSApp, NSStatusBar, NSMenu, NSMenuItem, NSMakeRect  # noqa: F
 # Import the keyboard interface
 from keyboard_interface import create_keyboard_handler
 
-
-# Icon configuration - easy to customize
-ICON_IDLE = "W"  # Icon when not recording
-ICON_RECORDING = "●"  # Red circle icon for recording
-ICON_PROCESSING = "◎"  # Processing icon
+# Define icon constants
+TEXT_ICON_IDLE = "W"
+TEXT_ICON_RECORDING = "●"
+TEXT_ICON_PROCESSING = "◎"
 
 # Try to import Whisper, but make it optional
 try:
@@ -74,8 +73,15 @@ class WhisperTyperApp(rumps.App):
 
     def __init__(self):
         # Use the idle icon from configuration
-        super(WhisperTyperApp, self).__init__("WhisperTyper", ICON_IDLE)
+        super(WhisperTyperApp, self).__init__(
+            "WhisperTyper",
+            TEXT_ICON_IDLE,
+        )
         logging.info("Initializing WhisperTyperApp")
+
+        # Try to load image icons
+        self.using_image_icons = False
+        self.try_load_image_icons()
 
         # Internal state
         self.recording = False
@@ -162,6 +168,177 @@ class WhisperTyperApp(rumps.App):
         self.initialize_keyboard_handler()
 
         logging.info("Initialization complete")
+
+    def is_retina_display(self):
+        """Check if we're running on a Retina display"""
+        try:
+            import Cocoa
+
+            # Get the main screen
+            screen = Cocoa.NSScreen.mainScreen()
+            # Check if it's a Retina display
+            return screen.backingScaleFactor() > 1.0
+        except Exception as e:
+            # If we can't determine, assume not Retina
+            logging.warning(f"Could not detect Retina display: {e}")
+            return False
+
+    def try_load_image_icons(self):
+        """Attempt to load image icons with Retina support"""
+        try:
+            # Resources directory
+            resources_dir = os.path.join(os.path.abspath("."), "resources")
+
+            # Check if resources directory exists
+            if not os.path.exists(resources_dir):
+                logging.warning(f"Resources directory not found: {resources_dir}")
+                return
+
+            # Log the contents of the resources directory
+            logging.info(f"Resources directory contents: {os.listdir(resources_dir)}")
+
+            # Check if we're on a Retina display
+            is_retina = self.is_retina_display()
+            logging.info(f"Is Retina display: {is_retina}")
+
+            # Find icon files - use @2x versions for Retina displays
+            suffix = "@2x" if is_retina else ""
+
+            # Set up paths for all icon states
+            template_path = os.path.join(
+                resources_dir, f"menubar_icon_template{suffix}.png"
+            )
+            regular_path = os.path.join(resources_dir, f"menubar_icon{suffix}.png")
+            recording_path = os.path.join(
+                resources_dir, f"menubar_icon_recording{suffix}.png"
+            )
+            processing_path = os.path.join(
+                resources_dir, f"menubar_icon_processing{suffix}.png"
+            )
+
+            # Check which files exist and fall back to non-retina versions if needed
+            if os.path.exists(template_path):
+                self.icon_idle = template_path
+                is_template = True
+            elif os.path.exists(regular_path):
+                self.icon_idle = regular_path
+                is_template = False
+            elif os.path.exists(
+                os.path.join(resources_dir, "menubar_icon_template.png")
+            ):
+                self.icon_idle = os.path.join(
+                    resources_dir, "menubar_icon_template.png"
+                )
+                is_template = True
+            elif os.path.exists(os.path.join(resources_dir, "menubar_icon.png")):
+                self.icon_idle = os.path.join(resources_dir, "menubar_icon.png")
+                is_template = False
+            else:
+                self.icon_idle = None
+                is_template = False
+
+            # Recording icon
+            if os.path.exists(recording_path):
+                self.icon_recording = recording_path
+            elif os.path.exists(
+                os.path.join(resources_dir, "menubar_icon_recording.png")
+            ):
+                self.icon_recording = os.path.join(
+                    resources_dir, "menubar_icon_recording.png"
+                )
+            else:
+                self.icon_recording = self.icon_idle  # Fall back to idle icon
+
+            # Processing icon
+            if os.path.exists(processing_path):
+                self.icon_processing = processing_path
+            elif os.path.exists(
+                os.path.join(resources_dir, "menubar_icon_processing.png")
+            ):
+                self.icon_processing = os.path.join(
+                    resources_dir, "menubar_icon_processing.png"
+                )
+            else:
+                self.icon_processing = self.icon_idle  # Fall back to idle icon
+
+            # Log icon paths
+            logging.info(
+                f"Idle icon: {self.icon_idle}, exists: {self.icon_idle and os.path.exists(self.icon_idle)}"
+            )
+            logging.info(
+                f"Recording icon: {self.icon_recording}, exists: {self.icon_recording and os.path.exists(self.icon_recording)}"
+            )
+            logging.info(
+                f"Processing icon: {self.icon_processing}, exists: {self.icon_processing and os.path.exists(self.icon_processing)}"
+            )
+
+            # If we found the idle icon, try to use it
+            if self.icon_idle and os.path.exists(self.icon_idle):
+                logging.info(f"Using icon: {self.icon_idle}")
+
+                try:
+                    # Set the icon
+                    self.icon = self.icon_idle
+
+                    # Set template mode if using template icon
+                    if is_template:
+                        logging.info("Setting template mode")
+                        self._template = True
+                        if hasattr(self, "template"):
+                            self.template = True
+
+                    self.using_image_icons = True
+                    logging.info("Successfully set initial icon")
+                except Exception as e:
+                    logging.error(f"Failed to set icon: {e}")
+                    self.title = TEXT_ICON_IDLE
+                    self.using_image_icons = False
+            else:
+                # Fall back to text icon
+                logging.warning("No suitable icons found, using text")
+                self.title = TEXT_ICON_IDLE
+                self.using_image_icons = False
+
+        except Exception as e:
+            logging.error(f"Error loading icons: {str(e)}")
+            import traceback
+
+            logging.error(traceback.format_exc())
+            self.using_image_icons = False
+
+    def set_app_icon_state(self, state):
+        """Set the app icon based on state with improved error handling"""
+        try:
+            if state == "idle":
+                icon_path = self.icon_idle
+                text_icon = TEXT_ICON_IDLE
+            elif state == "recording":
+                icon_path = self.icon_recording
+                text_icon = TEXT_ICON_RECORDING
+            elif state == "processing":
+                icon_path = self.icon_processing
+                text_icon = TEXT_ICON_PROCESSING
+            else:
+                logging.warning(f"Unknown icon state: {state}")
+                icon_path = self.icon_idle
+                text_icon = TEXT_ICON_IDLE
+
+            if self.using_image_icons and icon_path and os.path.exists(icon_path):
+                logging.info(f"Setting {state} icon: {icon_path}")
+                self.icon = icon_path
+            else:
+                logging.info(f"Setting {state} text icon: {text_icon}")
+                self.title = text_icon
+
+        except Exception as e:
+            logging.error(f"Error setting icon state {state}: {e}")
+            # Fall back to text icon
+            if state == "idle":
+                self.title = TEXT_ICON_IDLE
+            elif state == "recording":
+                self.title = TEXT_ICON_RECORDING
+            elif state == "processing":
+                self.title = TEXT_ICON_PROCESSING
 
     def initialize_keyboard_handler(self):
         """Initialize the keyboard shortcut handler with the best available method"""
@@ -318,8 +495,9 @@ class WhisperTyperApp(rumps.App):
             self.processing = True  # Enter processing state
             sender.title = "Start Recording"
             self.status_item.title = "Status: Processing..."
-            # Use the processing icon from configuration
-            self.title = ICON_PROCESSING
+
+            # Set the processing icon
+            self.set_app_icon_state("processing")
         else:
             # Start recording
             logging.info("Starting recording")
@@ -336,8 +514,9 @@ class WhisperTyperApp(rumps.App):
             self.recording = True
             sender.title = "Stop Recording"
             self.status_item.title = "Status: Recording..."
-            # Use the recording icon from configuration
-            self.title = ICON_RECORDING
+
+            # Set the recording icon
+            self.set_app_icon_state("recording")
 
             # Start a background thread for recording
             logging.info("Starting recording thread")
@@ -435,7 +614,7 @@ class WhisperTyperApp(rumps.App):
 
                 # Update status back to ready
                 self.status_item.title = "Status: Ready"
-                self.title = ICON_IDLE  # Back to idle icon
+                self.set_app_icon_state("idle")
                 self.processing = False  # Exit processing state
             else:
                 logging.warning("No audio frames captured")
@@ -443,7 +622,7 @@ class WhisperTyperApp(rumps.App):
 
                 # Update status back to ready
                 self.status_item.title = "Status: Ready"
-                self.title = ICON_IDLE  # Back to idle icon
+                self.set_app_icon_state("idle")
                 self.processing = False  # Exit processing state
 
         except Exception as e:
@@ -452,7 +631,7 @@ class WhisperTyperApp(rumps.App):
             # Update status to error
             self.record_button.title = "Start Recording"
             self.status_item.title = "Status: Error - See log"
-            self.title = ICON_IDLE  # Back to idle icon
+            self.set_app_icon_state("idle")
             self.recording = False
             self.processing = False  # Exit processing state
 
